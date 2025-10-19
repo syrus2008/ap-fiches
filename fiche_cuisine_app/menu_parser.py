@@ -13,9 +13,23 @@ SUPPORTED_LANGS = "fra+nld"
 logger = logging.getLogger(__name__)
 
 SECTION_KEYWORDS = {
-    "entries": ["entrée", "entrées", "entree", "entrees", "voorgerecht", "voorgerechten", "vooraf"],
-    "plats": ["plat", "plats", "hoofdgerecht", "hoofdgerechten", "gerechten", "gerechten hoofd"],
-    "desserts": ["dessert", "desserts", "nagerecht", "nagerechten"],
+    "entries": [
+        "entrée", "entrées", "entree", "entrees",
+        "entrées froides", "entrées chaudes",
+        "voorgerecht", "voorgerechten", "vooraf",
+        "starters", "suggesties", "suggestions",
+        "soep", "soepen", "salade", "salades"
+    ],
+    "plats": [
+        "plat", "plats", "plats principaux", "salé", "sale", "salé ",
+        "hoofdgerecht", "hoofdgerechten", "gerechten", "gerechten hoofd",
+        "viandes", "poissons", "pâtes", "pates", "pasta",
+        "pizzas", "burgers", "vleesgerechten", "visgerechten", "hartig"
+    ],
+    "desserts": [
+        "dessert", "desserts", "desserts maison", "sucré", "sucre",
+        "nagerecht", "nagerechten", "ijs", "glaces", "zoet"
+    ],
     "formules": ["formule", "formules", "menu", "menus", "menu du jour", "dagmenu"],
 }
 
@@ -48,6 +62,11 @@ def extract_menu_text(pdf_path: str) -> str:
     return text
 
 
+def extract_menu_text_force_ocr(pdf_path: str) -> str:
+    """Always OCR the PDF pages (useful if PyMuPDF text misses visual text)."""
+    return _ocr_scanned_pdf(pdf_path)
+
+
 def normalize(s: str) -> str:
     return " ".join(s.lower().strip().split())
 
@@ -78,7 +97,7 @@ def _clean_dish_line(line: str) -> str:
     return line
 
 
-def build_lexicon_from_text(text: str, only_formules: bool = False) -> Dict[str, List[str]]:
+def build_lexicon_from_text(text: str, only_formules: bool = False, forced_section: str | None = None) -> Dict[str, List[str]]:
     """Build a lexicon from PDF text.
 
     - If only_formules=True: collect items only under 'formules' section.
@@ -86,7 +105,11 @@ def build_lexicon_from_text(text: str, only_formules: bool = False) -> Dict[str,
     """
     lexicon: Dict[str, List[str]] = {k: [] for k in SECTION_KEYWORDS.keys()}
     current_section: str | None = None
-    for raw_line in text.splitlines():
+    lines = text.splitlines()
+    # Debug preview of text
+    preview = "\n".join(lines[:30])
+    logger.debug(f"MENU: text preview (first 30 lines)\n{preview}")
+    for raw_line in lines:
         low = normalize(raw_line)
         if not low:
             continue
@@ -120,6 +143,9 @@ def build_lexicon_from_text(text: str, only_formules: bool = False) -> Dict[str,
                         current_section = sec_try
                         target_section = sec_try
                         break
+                # If still nothing and a forced section is provided, use it
+                if not target_section and forced_section in ("entries", "plats", "desserts"):
+                    target_section = forced_section
 
         if not target_section:
             continue

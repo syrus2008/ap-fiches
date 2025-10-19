@@ -61,6 +61,12 @@ with menu_tab:
     with c2:
         pdf_formules = st.file_uploader("PDFs: Formules / Menus (séparés)", type=["pdf"], accept_multiple_files=True, key="pdf_formules")
 
+    c3, c4 = st.columns(2)
+    with c3:
+        force_ocr = st.checkbox("Forcer OCR (si texte non détecté)", value=False)
+    with c4:
+        forced_section = st.selectbox("Section forcée (pour PDF standard)", ["Aucune", "entries", "plats", "desserts"], index=0)
+
     if st.button("Construire/Mettre à jour le lexique") and (pdf_files or pdf_formules):
         logging.info("UI: Building lexicon from uploaded PDFs")
         combined = {k: list(st.session_state.lexicon.get(k, [])) for k in st.session_state.lexicon.keys()}
@@ -71,8 +77,17 @@ with menu_tab:
                 tf.write(up.getbuffer())
                 tmp_path = tf.name
             logging.debug(f"UI: Parsing standard menu PDF {up.name} at {tmp_path}")
-            text = menu_parser.extract_menu_text(tmp_path)
-            lex = menu_parser.build_lexicon_from_text(text, only_formules=False)
+            if force_ocr:
+                text = menu_parser.extract_menu_text_force_ocr(tmp_path)
+            else:
+                text = menu_parser.extract_menu_text(tmp_path)
+            fs = None if forced_section == "Aucune" else forced_section
+            lex = menu_parser.build_lexicon_from_text(text, only_formules=False, forced_section=fs)
+            # Auto fallback to OCR if nothing parsed and OCR not forced
+            if not force_ocr and not any(lex.get(k) for k in ["entries", "plats", "desserts"]):
+                logging.warning("UI: No items found via text extraction; retrying with OCR fallback")
+                text = menu_parser.extract_menu_text_force_ocr(tmp_path)
+                lex = menu_parser.build_lexicon_from_text(text, only_formules=False, forced_section=fs)
             combined = menu_parser.merge_lexicons(combined, lex)
         # Formules only
         for up in (pdf_formules or []):
@@ -80,7 +95,10 @@ with menu_tab:
                 tf.write(up.getbuffer())
                 tmp_path = tf.name
             logging.debug(f"UI: Parsing formules PDF {up.name} at {tmp_path}")
-            text = menu_parser.extract_menu_text(tmp_path)
+            if force_ocr:
+                text = menu_parser.extract_menu_text_force_ocr(tmp_path)
+            else:
+                text = menu_parser.extract_menu_text(tmp_path)
             lex_f = menu_parser.build_lexicon_from_text(text, only_formules=True)
             combined = menu_parser.merge_lexicons(combined, lex_f)
         st.session_state.lexicon = combined
