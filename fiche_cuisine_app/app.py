@@ -3,10 +3,10 @@ import io
 from typing import Dict, List
 import streamlit as st
 
-from . import ocr
-from . import menu_parser
-from . import matcher
-from . import pdf_gen
+from fiche_cuisine_app import ocr
+from fiche_cuisine_app import menu_parser
+from fiche_cuisine_app import matcher
+from fiche_cuisine_app import pdf_gen
 
 st.set_page_config(page_title="Fiche Cuisine", page_icon="🍽️", layout="wide")
 
