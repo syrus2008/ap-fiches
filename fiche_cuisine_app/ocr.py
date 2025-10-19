@@ -5,6 +5,7 @@ import numpy as np
 import pytesseract
 from PIL import Image
 import io
+import logging
 
 # Configure Tesseract command from env if provided
 TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
@@ -12,6 +13,7 @@ if TESSERACT_CMD and os.path.exists(TESSERACT_CMD):
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 SUPPORTED_LANGS = "fra+nld"  # French + Dutch (Belgium)
+logger = logging.getLogger(__name__)
 
 
 def _auto_contrast(gray: np.ndarray) -> np.ndarray:
@@ -22,6 +24,7 @@ def _auto_contrast(gray: np.ndarray) -> np.ndarray:
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
     """Load an image from bytes and return a preprocessed grayscale np.ndarray."""
+    logger.debug("OCR: loading image bytes for preprocessing")
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     np_img = np.array(image)
     gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
@@ -31,12 +34,14 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
     # Adaptive threshold for crisp text
     bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                cv2.THRESH_BINARY, 31, 10)
+    logger.debug("OCR: preprocessing complete (bw image ready)")
     return bw
 
 
 def ocr_text(image: np.ndarray, lang: str = SUPPORTED_LANGS) -> str:
     # Use LSTM OCR with configuration tuned for UI text
     custom_oem_psm_config = "--oem 3 --psm 6"
+    logger.info(f"OCR: running tesseract with langs={lang} config={custom_oem_psm_config}")
     text = pytesseract.image_to_string(image, lang=lang, config=custom_oem_psm_config)
     return text
 
@@ -60,6 +65,7 @@ def find_reservation_notes(full_text: str) -> List[str]:
     while i < len(lines):
         line = lines[i].lower()
         if any(m in line for m in start_markers):
+            logger.debug(f"OCR: reservation note marker found at line {i}: {lines[i]}")
             # Collect subsequent non-empty lines until a separator-like line
             i += 1
             block: List[str] = []
@@ -73,6 +79,7 @@ def find_reservation_notes(full_text: str) -> List[str]:
                 notes.append(" ".join(block))
         else:
             i += 1
+    logger.info(f"OCR: extracted {len(notes)} reservation note block(s)")
     return notes
 
 

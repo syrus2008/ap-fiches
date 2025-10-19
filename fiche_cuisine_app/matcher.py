@@ -2,6 +2,9 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 import re
 from rapidfuzz import fuzz, process
+import logging
+
+logger = logging.getLogger(__name__)
 
 COUNT_PATTERNS = [
     # 3 x pizza, 3x pizza
@@ -16,7 +19,9 @@ COUNT_PATTERNS = [
 def split_candidates(note: str) -> List[str]:
     # Split by separators, keep words groups
     parts = re.split(r"[;,/\n]|\band\b|\bet\b", note, flags=re.IGNORECASE)
-    return [p.strip(" .:\t-") for p in parts if p.strip()]
+    cands = [p.strip(" .:\t-") for p in parts if p.strip()]
+    logger.debug(f"MATCH: split {len(cands)} candidate(s) from note '{note[:50]}...' ")
+    return cands
 
 
 def best_match(candidate: str, lexicon: Dict[str, List[str]], score_cutoff: int = 80) -> Tuple[str, str, int]:
@@ -29,6 +34,7 @@ def best_match(candidate: str, lexicon: Dict[str, List[str]], score_cutoff: int 
             item, score, _ = match
             if score > best_score:
                 best_label, best_item, best_score = section, item, score
+    logger.debug(f"MATCH: candidate='{candidate}' => section='{best_label}', item='{best_item}', score={best_score}")
     return best_label, best_item, best_score
 
 
@@ -55,6 +61,7 @@ def match_note_to_items(note: str, lexicon: Dict[str, List[str]]) -> List[Dict]:
         else:
             # unknown, keep as free text
             results.append({"section": "inconnu", "name": name_raw, "qty": qty, "score": 0, "original": cand})
+    logger.info(f"MATCH: note produced {len(results)} matched item(s)")
     return results
 
 
@@ -63,4 +70,5 @@ def aggregate(items: List[Dict]) -> Dict[str, int]:
     for it in items:
         key = it["name"].strip().title()
         total[key] = total.get(key, 0) + int(it.get("qty", 1))
+    logger.info(f"MATCH: aggregated {len(items)} items into {len(total)} total key(s)")
     return total

@@ -7,8 +7,10 @@ import pytesseract
 from PIL import Image
 import io
 import re
+import logging
 
 SUPPORTED_LANGS = "fra+nld"
+logger = logging.getLogger(__name__)
 
 SECTION_KEYWORDS = {
     "entries": ["entrée", "entrées", "entree", "entrees", "voorgerecht", "voorgerechten", "vooraf"],
@@ -19,6 +21,7 @@ SECTION_KEYWORDS = {
 
 
 def _extract_text_pymupdf(pdf_path: str) -> str:
+    logger.info(f"MENU: extracting text via PyMuPDF from {pdf_path}")
     text_parts: List[str] = []
     with fitz.open(pdf_path) as doc:
         for page in doc:
@@ -27,6 +30,7 @@ def _extract_text_pymupdf(pdf_path: str) -> str:
 
 
 def _ocr_scanned_pdf(pdf_path: str) -> str:
+    logger.info(f"MENU: OCR fallback via Tesseract for {pdf_path}")
     images = convert_from_path(pdf_path, dpi=200)
     buf = io.StringIO()
     for img in images:
@@ -128,6 +132,9 @@ def build_lexicon_from_text(text: str, only_formules: bool = False) -> Dict[str,
             continue
         if cleaned not in lexicon[target_section]:
             lexicon[target_section].append(cleaned)
+    # Log counts
+    for sec_key, items in lexicon.items():
+        logger.info(f"MENU: built {len(items)} item(s) for section '{sec_key}' (only_formules={only_formules})")
     return lexicon
 
 

@@ -5,9 +5,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def generate_fiche_pdf(title: str, date_label: str, service_label: str, reservations: List[Dict], totals: Dict[str, int]) -> bytes:
+    logger.info(f"PDF: generating fiche - title='{title}', date='{date_label}', service='{service_label}'")
+    logger.debug(f"PDF: totals count={len(totals)} reservations count={len(reservations)}")
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
@@ -38,6 +43,7 @@ def generate_fiche_pdf(title: str, date_label: str, service_label: str, reservat
     # Reservations detail
     story.append(Paragraph("<b>Détail par réservation</b>", styles['Heading3']))
     for res in reservations:
+        logger.debug(f"PDF: reservation name='{res.get('name','')}', time='{res.get('time','')}', pax='{res.get('pax','')}', items={len(res.get('items', []))}")
         story.append(Paragraph(f"<b>{res.get('time','')} - {res.get('name','')}</b> ({res.get('pax','')} pax)", styles['Heading4']))
         lines = []
         for it in res.get('items', []):

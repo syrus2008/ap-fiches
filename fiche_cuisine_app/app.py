@@ -2,6 +2,7 @@ import os
 from typing import Dict, List
 import streamlit as st
 import sys
+import logging
 
 # Ensure project root is on sys.path so `fiche_cuisine_app` is importable
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -12,6 +13,7 @@ from fiche_cuisine_app import ocr
 from fiche_cuisine_app import menu_parser
 from fiche_cuisine_app import matcher
 from fiche_cuisine_app import pdf_gen
+from fiche_cuisine_app import logging_utils
 
 st.set_page_config(page_title="Fiche Cuisine", page_icon="🍽️", layout="wide")
 
@@ -19,6 +21,8 @@ if "lexicon" not in st.session_state:
     st.session_state.lexicon = {k: [] for k in menu_parser.SECTION_KEYWORDS.keys()}
 if "reservations" not in st.session_state:
     st.session_state.reservations: List[Dict] = []
+if "log_level" not in st.session_state:
+    st.session_state.log_level = "INFO"
 
 st.title("Fiche Cuisine (FR/NL)")
 
@@ -31,6 +35,22 @@ with st.expander("Configuration Tesseract", expanded=False):
         else:
             st.warning("Chemin invalide.")
 
+# Logging controls
+with st.sidebar:
+    st.markdown("### Journalisation")
+    lvl = st.selectbox("Niveau de log", ["DEBUG", "INFO", "WARNING", "ERROR"], index=["DEBUG","INFO","WARNING","ERROR"].index(st.session_state.log_level))
+    st.session_state.log_level = lvl
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+    }
+    mem_handler = logging_utils.ensure_logging(level_map[lvl])
+    if st.button("Vider les logs"):
+        logging_utils.clear_logs()
+    st.download_button("Télécharger les logs", data=logging_utils.get_logs_text().encode("utf-8"), file_name="fiche_cuisine_logs.txt")
+
 menu_tab, notes_tab, export_tab = st.tabs(["1) Menus PDF → Lexique", "2) Réservations → Plats", "3) Générer PDF"]) 
 
 with menu_tab:
@@ -42,6 +62,7 @@ with menu_tab:
         pdf_formules = st.file_uploader("PDFs: Formules / Menus (séparés)", type=["pdf"], accept_multiple_files=True, key="pdf_formules")
 
     if st.button("Construire/Mettre à jour le lexique") and (pdf_files or pdf_formules):
+        logging.info("UI: Building lexicon from uploaded PDFs")
         combined = {k: list(st.session_state.lexicon.get(k, [])) for k in st.session_state.lexicon.keys()}
         import tempfile
         # Standard sections
@@ -49,6 +70,7 @@ with menu_tab:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
                 tf.write(up.getbuffer())
                 tmp_path = tf.name
+            logging.debug(f"UI: Parsing standard menu PDF {up.name} at {tmp_path}")
             text = menu_parser.extract_menu_text(tmp_path)
             lex = menu_parser.build_lexicon_from_text(text, only_formules=False)
             combined = menu_parser.merge_lexicons(combined, lex)
@@ -57,11 +79,13 @@ with menu_tab:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
                 tf.write(up.getbuffer())
                 tmp_path = tf.name
+            logging.debug(f"UI: Parsing formules PDF {up.name} at {tmp_path}")
             text = menu_parser.extract_menu_text(tmp_path)
             lex_f = menu_parser.build_lexicon_from_text(text, only_formules=True)
             combined = menu_parser.merge_lexicons(combined, lex_f)
         st.session_state.lexicon = combined
         st.success("Lexique mis à jour.")
+        logging.info("UI: Lexicon updated and stored in session")
     st.write("Lexique actuel (éditable):")
     for sec in st.session_state.lexicon.keys():
         st.markdown(f"**{sec.title()}**")
@@ -75,6 +99,7 @@ with notes_tab:
     imgs = st.file_uploader("Images (PNG/JPG)", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True)
     if st.button("Analyser les images") and imgs:
         st.session_state.reservations = []
+        logging.info(f"UI: Analyzing {len(imgs)} uploaded image(s)")
         for up in imgs:
             raw = up.getvalue()
             full_text, notes = ocr.notes_from_image_bytes(raw)
@@ -90,6 +115,7 @@ with notes_tab:
                     "note": note,
                     "items": items,
                 })
+        logging.info(f"UI: Detected {len(st.session_state.reservations)} reservation block(s)")
         st.success(f"{len(st.session_state.reservations)} réservation(s) détectée(s).")
 
     if st.session_state.reservations:
@@ -117,8 +143,10 @@ with notes_tab:
                         to_del.append(j)
             for j in sorted(to_del, reverse=True):
                 del res["items"][j]
+                logging.debug(f"UI: Deleted item index {j} from reservation {i}")
             if st.button("+ Ajouter un plat", key=f"add_item_{i}"):
                 res["items"].append({"section": "", "name": "", "qty": 1, "score": 0, "original": ""})
+                logging.debug(f"UI: Added empty item to reservation {i}")
 
 with export_tab:
     st.subheader("Générer la fiche cuisine PDF")
@@ -127,9 +155,15 @@ with export_tab:
     service_label = st.text_input("Service", value="")
     if st.button("Générer"):
         # Aggregate totals across reservations
+        logging.info("UI: Generating fiche cuisine PDF")
         all_items: List[Dict] = []
         for res in st.session_state.reservations:
             all_items.extend(res.get("items", []))
         totals = matcher.aggregate(all_items)
         pdf_bytes = pdf_gen.generate_fiche_pdf(title, date_label, service_label, st.session_state.reservations, totals)
         st.download_button("Télécharger la fiche.pdf", data=pdf_bytes, file_name="fiche_cuisine.pdf", mime="application/pdf")
+        logging.info("UI: PDF generated and ready for download")
+
+# Show live logs in an expander at the bottom
+with st.expander("Logs (live)", expanded=False):
+    st.text_area("Logs", value=logging_utils.get_logs_text(), height=200)
