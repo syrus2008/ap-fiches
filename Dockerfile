@@ -26,6 +26,7 @@ EXPOSE 8501
 
 # Streamlit will be run on $PORT with 0.0.0.0 binding for Railway
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
 
 CMD ["bash", "-lc", "streamlit run fiche_cuisine_app/app.py --server.port=$PORT --server.address=0.0.0.0"]
