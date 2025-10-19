@@ -35,17 +35,31 @@ menu_tab, notes_tab, export_tab = st.tabs(["1) Menus PDF → Lexique", "2) Rése
 
 with menu_tab:
     st.subheader("Importer vos menus (PDF FR/NL)")
-    pdf_files = st.file_uploader("PDFs de menu", type=["pdf"], accept_multiple_files=True)
-    if st.button("Construire/Mettre à jour le lexique") and pdf_files:
+    c1, c2 = st.columns(2)
+    with c1:
+        pdf_files = st.file_uploader("PDFs: Entrées / Plats / Desserts", type=["pdf"], accept_multiple_files=True, key="pdf_std")
+    with c2:
+        pdf_formules = st.file_uploader("PDFs: Formules / Menus (séparés)", type=["pdf"], accept_multiple_files=True, key="pdf_formules")
+
+    if st.button("Construire/Mettre à jour le lexique") and (pdf_files or pdf_formules):
         combined = {k: list(st.session_state.lexicon.get(k, [])) for k in st.session_state.lexicon.keys()}
-        for up in pdf_files:
-            import tempfile
+        import tempfile
+        # Standard sections
+        for up in (pdf_files or []):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
                 tf.write(up.getbuffer())
                 tmp_path = tf.name
             text = menu_parser.extract_menu_text(tmp_path)
-            lex = menu_parser.build_lexicon_from_text(text)
+            lex = menu_parser.build_lexicon_from_text(text, only_formules=False)
             combined = menu_parser.merge_lexicons(combined, lex)
+        # Formules only
+        for up in (pdf_formules or []):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
+                tf.write(up.getbuffer())
+                tmp_path = tf.name
+            text = menu_parser.extract_menu_text(tmp_path)
+            lex_f = menu_parser.build_lexicon_from_text(text, only_formules=True)
+            combined = menu_parser.merge_lexicons(combined, lex_f)
         st.session_state.lexicon = combined
         st.success("Lexique mis à jour.")
     st.write("Lexique actuel (éditable):")

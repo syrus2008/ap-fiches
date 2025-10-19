@@ -6,14 +6,15 @@ from pdf2image import convert_from_path
 import pytesseract
 from PIL import Image
 import io
+import re
 
 SUPPORTED_LANGS = "fra+nld"
 
 SECTION_KEYWORDS = {
-    "entries": ["entrées", "entrees", "voorgerechten", "vooraf"],
-    "plats": ["plats", "hoofdgerecht", "hoofdgerechten", "gerechten"],
-    "desserts": ["desserts", "nagerechten", "dessert"],
-    "formules": ["formule", "formules", "menu", "menus"],
+    "entries": ["entrée", "entrées", "entree", "entrees", "voorgerecht", "voorgerechten", "vooraf"],
+    "plats": ["plat", "plats", "hoofdgerecht", "hoofdgerechten", "gerechten", "gerechten hoofd"],
+    "desserts": ["dessert", "desserts", "nagerecht", "nagerechten"],
+    "formules": ["formule", "formules", "menu", "menus", "menu du jour", "dagmenu"],
 }
 
 
@@ -47,33 +48,86 @@ def normalize(s: str) -> str:
     return " ".join(s.lower().strip().split())
 
 
-def build_lexicon_from_text(text: str) -> Dict[str, List[str]]:
-    # Initialize sections
+PRICE_RE = re.compile(r"(\b\d{1,3}(?:[\.,]\d{1,2})?\b)\s*(?:€|eur|euro)?", re.IGNORECASE)
+
+
+def _is_section_heading(line: str) -> str | None:
+    """Return section key if the line is a heading, else None.
+    We consider headings that are short and mostly just the section word(s).
+    """
+    stripped = line.strip(" -•·:\t|")
+    # very short headings (1-3 words) matching keywords
+    for sec, kws in SECTION_KEYWORDS.items():
+        for kw in kws:
+            # exact or startswith match, not mid-sentence
+            if stripped == kw or stripped.startswith(kw + ":"):
+                return sec
+    return None
+
+
+def _clean_dish_line(line: str) -> str:
+    # remove price tokens
+    line = PRICE_RE.sub("", line)
+    # remove leading bullets/dashes and extra spaces
+    line = line.strip(" -•·:\t|")
+    line = re.sub(r"\s{2,}", " ", line)
+    return line
+
+
+def build_lexicon_from_text(text: str, only_formules: bool = False) -> Dict[str, List[str]]:
+    """Build a lexicon from PDF text.
+
+    - If only_formules=True: collect items only under 'formules' section.
+    - Otherwise: collect under entries/plats/desserts and ignore lines mentioning 'menu/formule' when misaligned.
+    """
     lexicon: Dict[str, List[str]] = {k: [] for k in SECTION_KEYWORDS.keys()}
-    current_section = None
+    current_section: str | None = None
     for raw_line in text.splitlines():
-        line = normalize(raw_line)
-        if not line:
+        low = normalize(raw_line)
+        if not low:
             continue
-        # Detect section
-        for sec, kws in SECTION_KEYWORDS.items():
-            if any(kw in line for kw in kws):
-                current_section = sec
-                break
+        # Detect a heading if line is short
+        sec = _is_section_heading(low)
+        if sec:
+            current_section = sec
+            continue
+
+        # Skip obvious non-dish lines
+        if len(low) <= 2 or low.isdigit():
+            continue
+
+        # If it's a 'menu/formule' mention but we are not building formules, skip
+        if not only_formules and any(kw in low for kw in SECTION_KEYWORDS["formules"]):
+            # Do not flip current section to formules automatically; treat as non-dish
+            continue
+
+        # Choose section
+        target_section: str | None = None
+        if only_formules:
+            target_section = "formules"
         else:
-            # Regular line: consider as dish if not a price-only line
-            if current_section:
-                # Remove trailing prices like 12,00 € or € 12.50
-                cleaned = line
-                # simple price patterns
-                for sym in ["€", "eur", "euro", ",", ".", "-"]:
-                    cleaned = cleaned.replace(" €", " ")
-                # drop very short lines
-                if len(cleaned) > 2:
-                    # stop at double spaces or tabs where description continues
-                    item = cleaned.split("  ")[0].strip(" -•·:;|\t")
-                    if item and item not in lexicon[current_section]:
-                        lexicon[current_section].append(item)
+            # Use current_section only if it's entries/plats/desserts
+            if current_section in ("entries", "plats", "desserts"):
+                target_section = current_section
+            else:
+                # Try weak detection: if line contains any section keyword (non-formule)
+                for sec_try in ("entries", "plats", "desserts"):
+                    if any(kw in low for kw in SECTION_KEYWORDS[sec_try]):
+                        current_section = sec_try
+                        target_section = sec_try
+                        break
+
+        if not target_section:
+            continue
+
+        cleaned = _clean_dish_line(low)
+        if len(cleaned) < 3:
+            continue
+        # Avoid generic words
+        if cleaned in ("entrée", "entree", "plat", "dessert"):
+            continue
+        if cleaned not in lexicon[target_section]:
+            lexicon[target_section].append(cleaned)
     return lexicon
 
 
